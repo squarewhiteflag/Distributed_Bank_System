@@ -289,8 +289,13 @@ def main():
     project_root = Path(__file__).resolve().parents[2]
     logs_dir = project_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    sys.stdout = Tee(sys.stdout, logs_dir / "server.log")
-    sys.stderr = Tee(sys.stderr, logs_dir / "server.log")
+
+    # 清空服务器日志文件
+    server_log_path = logs_dir / "server.log"
+    server_log_path.write_text("")  # 清空日志文件
+
+    sys.stdout = Tee(sys.stdout, server_log_path)
+    sys.stderr = Tee(sys.stderr, server_log_path)
 
     parser = argparse.ArgumentParser(description='Distributed Banking System - Server')
     parser.add_argument('--host', type=str, default=DEFAULT_SERVER_HOST,

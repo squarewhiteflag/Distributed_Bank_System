@@ -8,6 +8,54 @@ class ClientUI:
     """客户端用户界面"""
 
     @staticmethod
+    def _get_int_input(prompt: str, min_val: int = None, max_val: int = None) -> int:
+        """
+        获取整数输入，带验证循环
+
+        Args:
+            prompt: 提示信息
+            min_val: 最小值（可选）
+            max_val: 最大值（可选）
+
+        Returns:
+            用户输入的有效整数
+        """
+        while True:
+            try:
+                value = int(input(prompt))
+                if min_val is not None and value < min_val:
+                    print(f"Input must be at least {min_val}. Please try again.")
+                    continue
+                if max_val is not None and value > max_val:
+                    print(f"Input must be at most {max_val}. Please try again.")
+                    continue
+                return value
+            except ValueError:
+                print("Invalid input. Please enter a valid integer.")
+
+    @staticmethod
+    def _get_float_input(prompt: str, min_val: float = 0.0) -> float:
+        """
+        获取浮点数输入，带验证循环
+
+        Args:
+            prompt: 提示信息
+            min_val: 最小值（默认为 0）
+
+        Returns:
+            用户输入的有效浮点数
+        """
+        while True:
+            try:
+                value = float(input(prompt))
+                if value < min_val:
+                    print(f"Input must be at least {min_val}. Please try again.")
+                    continue
+                return value
+            except ValueError:
+                print("Invalid input. Please enter a valid number.")
+
+    @staticmethod
     def display_menu():
         """显示主菜单"""
         print("\n" + "="*50)
@@ -50,9 +98,9 @@ class ClientUI:
         password = input("Enter password (max 16 chars): ").ljust(16)[:16]
 
         print("Currency types: 1=USD, 2=EUR, 3=SGD, 4=CNY")
-        currency = int(input("Enter currency type: "))
+        currency = ClientUI._get_int_input("Enter currency type: ", min_val=1, max_val=4)
 
-        initial_balance = float(input("Enter initial balance: "))
+        initial_balance = ClientUI._get_float_input("Enter initial balance: ")
 
         return name, password, currency, initial_balance
 
@@ -66,7 +114,7 @@ class ClientUI:
         """
         print("\n--- Close Account ---")
         name = input("Enter your name: ")
-        account_number = int(input("Enter account number: "))
+        account_number = ClientUI._get_int_input("Enter account number: ", min_val=1)
         password = input("Enter password: ").ljust(16)[:16]
 
         return name, account_number, password
@@ -81,13 +129,13 @@ class ClientUI:
         """
         print("\n--- Deposit ---")
         name = input("Enter your name: ")
-        account_number = int(input("Enter account number: "))
+        account_number = ClientUI._get_int_input("Enter account number: ", min_val=1)
         password = input("Enter password: ").ljust(16)[:16]
 
         print("Currency types: 1=USD, 2=EUR, 3=SGD, 4=CNY")
-        currency = int(input("Enter currency type: "))
+        currency = ClientUI._get_int_input("Enter currency type: ", min_val=1, max_val=4)
 
-        amount = float(input("Enter amount to deposit: "))
+        amount = ClientUI._get_float_input("Enter amount to deposit: ")
 
         return name, account_number, password, currency, amount
 
@@ -101,13 +149,13 @@ class ClientUI:
         """
         print("\n--- Withdraw ---")
         name = input("Enter your name: ")
-        account_number = int(input("Enter account number: "))
+        account_number = ClientUI._get_int_input("Enter account number: ", min_val=1)
         password = input("Enter password: ").ljust(16)[:16]
 
         print("Currency types: 1=USD, 2=EUR, 3=SGD, 4=CNY")
-        currency = int(input("Enter currency type: "))
+        currency = ClientUI._get_int_input("Enter currency type: ", min_val=1, max_val=4)
 
-        amount = float(input("Enter amount to withdraw: "))
+        amount = ClientUI._get_float_input("Enter amount to withdraw: ")
 
         return name, account_number, password, currency, amount
 
@@ -120,7 +168,7 @@ class ClientUI:
             (account_number, password)
         """
         print("\n--- Query Account ---")
-        account_number = int(input("Enter account number: "))
+        account_number = ClientUI._get_int_input("Enter account number: ", min_val=1)
         password = input("Enter password: ").ljust(16)[:16]
 
         return account_number, password
@@ -134,10 +182,10 @@ class ClientUI:
             (from_account, password, to_account, amount)
         """
         print("\n--- Transfer ---")
-        from_account = int(input("Enter source account number: "))
+        from_account = ClientUI._get_int_input("Enter source account number: ", min_val=1)
         password = input("Enter source account password: ").ljust(16)[:16]
-        to_account = int(input("Enter destination account number: "))
-        amount = float(input("Enter amount to transfer: "))
+        to_account = ClientUI._get_int_input("Enter destination account number: ", min_val=1)
+        amount = ClientUI._get_float_input("Enter amount to transfer: ")
 
         return from_account, password, to_account, amount
 
@@ -151,10 +199,7 @@ class ClientUI:
         """
         print("\n--- Monitor Account Updates ---")
         print("You will receive updates for all account operations during monitoring.")
-        duration = int(input("Enter monitoring duration in seconds (10-300): "))
-
-        # 限制范围
-        duration = max(10, min(300, duration))
+        duration = ClientUI._get_int_input("Enter monitoring duration in seconds (10-500): ", min_val=10, max_val=500)
 
         return duration
 

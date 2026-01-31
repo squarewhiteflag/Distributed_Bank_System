@@ -78,6 +78,8 @@ distributed-banking-system/
 # 使用默认参数 (host=0.0.0.0, port=5000, at-most-once, 无丢包)
 python -m src.server.server
 
+python -m src.server.server --semantics at-most-once --loss-rate 0.5 --verbose
+
 # 使用自定义参数
 python -m src.server.server \
   --host 0.0.0.0 \

@@ -58,36 +58,38 @@ class BankingClient:
         Raises:
             Exception: 如果所有重试都失败
         """
-        retries = max_retries if max_retries is not None else (MAX_RETRIES if self.semantics == SEMANTICS_AT_LEAST_ONCE else 1)
+        retries = max_retries if max_retries is not None else MAX_RETRIES
 
-        for attempt in range(retries):
-            try:
-                # 创建socket
-                self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                self.sock.settimeout(DEFAULT_CLIENT_TIMEOUT)
+        # 在循环外创建socket，保持端口一致（重要：at-most-once语义依赖此）
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.sock.settimeout(DEFAULT_CLIENT_TIMEOUT)
 
-                # 模拟消息丢失（客户端请求）
-                if not self.loss_simulator.should_send():
-                    if attempt == max_retries - 1:
-                        raise Exception("Request lost (simulated) and max retries reached")
-                    ClientUI.display_info(f"Request lost (simulated), retrying... ({attempt + 1}/{max_retries})")
-                    time.sleep(0.5)  # 短暂等待后重试
-                    continue
+        try:
+            for attempt in range(retries):
+                try:
+                    # 模拟消息丢失（客户端请求）
+                    if not self.loss_simulator.should_send():
+                        if attempt == retries - 1:
+                            raise Exception("Request lost (simulated) and max retries reached")
+                        ClientUI.display_info(f"Request lost (simulated), retrying... ({attempt + 1}/{retries})")
+                        time.sleep(0.5)  # 短暂等待后重试
+                        continue
 
-                # 发送请求
-                self.sock.sendto(request_data, self.server_address)
+                    # 发送请求
+                    self.sock.sendto(request_data, self.server_address)
 
-                # 接收响应
-                response_data, _ = self.sock.recvfrom(MAX_MESSAGE_SIZE)
-                return response_data
+                    # 接收响应
+                    response_data, _ = self.sock.recvfrom(MAX_MESSAGE_SIZE)
+                    return response_data
 
-            except socket.timeout:
-                if attempt == max_retries - 1:
-                    raise Exception("Request timeout and max retries reached")
-                ClientUI.display_info(f"Request timeout, retrying... ({attempt + 1}/{max_retries})")
-            finally:
-                if self.sock:
-                    self.sock.close()
+                except socket.timeout:
+                    if attempt == retries - 1:
+                        raise Exception("Request timeout and max retries reached")
+                    ClientUI.display_info(f"Request timeout, retrying... ({attempt + 1}/{retries})")
+        finally:
+            # 只在所有重试结束后关闭一次socket
+            if self.sock:
+                self.sock.close()
 
         raise Exception("Failed to receive response")
 
@@ -96,16 +98,16 @@ class BankingClient:
         """
         使用已有socket发送请求（用于监控场景，保持端口一致）
         """
-        retries = max_retries if max_retries is not None else (MAX_RETRIES if self.semantics == SEMANTICS_AT_LEAST_ONCE else 1)
+        retries = max_retries if max_retries is not None else MAX_RETRIES
 
         for attempt in range(retries):
             try:
                 sock.settimeout(DEFAULT_CLIENT_TIMEOUT)
 
                 if not self.loss_simulator.should_send():
-                    if attempt == max_retries - 1:
+                    if attempt == retries - 1:
                         raise Exception("Request lost (simulated) and max retries reached")
-                    ClientUI.display_info(f"Request lost (simulated), retrying... ({attempt + 1}/{max_retries})")
+                    ClientUI.display_info(f"Request lost (simulated), retrying... ({attempt + 1}/{retries})")
                     time.sleep(0.5)
                     continue
 
@@ -113,9 +115,9 @@ class BankingClient:
                 response_data, _ = sock.recvfrom(MAX_MESSAGE_SIZE)
                 return response_data
             except socket.timeout:
-                if attempt == max_retries - 1:
+                if attempt == retries - 1:
                     raise Exception("Request timeout and max retries reached")
-                ClientUI.display_info(f"Request timeout, retrying... ({attempt + 1}/{max_retries})")
+                ClientUI.display_info(f"Request timeout, retrying... ({attempt + 1}/{retries})")
         raise Exception("Failed to receive response")
 
     def open_account(self):
@@ -409,8 +411,13 @@ def main():
     project_root = Path(__file__).resolve().parents[2]
     logs_dir = project_root / "logs"
     logs_dir.mkdir(parents=True, exist_ok=True)
-    sys.stdout = Tee(sys.stdout, logs_dir / "client.log")
-    sys.stderr = Tee(sys.stderr, logs_dir / "client.log")
+
+    # 清空客户端日志文件
+    client_log_path = logs_dir / "client.log"
+    client_log_path.write_text("")  # 清空日志文件
+
+    sys.stdout = Tee(sys.stdout, client_log_path)
+    sys.stderr = Tee(sys.stderr, client_log_path)
 
     parser = argparse.ArgumentParser(description='Distributed Banking System - Client')
     parser.add_argument('--server-host', type=str, required=True,
