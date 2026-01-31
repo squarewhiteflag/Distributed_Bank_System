@@ -24,7 +24,7 @@ class ServiceHandler:
         """
         self.account_manager = account_manager
 
-    def handle_request(self, request_data: bytes) -> bytes:
+    def handle_request(self, request_data: bytes):
         """
         处理客户端请求
 
@@ -32,7 +32,7 @@ class ServiceHandler:
             request_data: 请求数据（字节数组）
 
         Returns:
-            响应数据（字节数组）
+            (响应数据, 受影响的账户号列表)
         """
         try:
             # 解析请求头
@@ -59,7 +59,7 @@ class ServiceHandler:
                 return self._handle_transfer(request_data, offset, request_id)
             else:
                 # 未知操作
-                return ResponseBuilder(request_id, ResponseStatus.ERROR_INVALID_OPERATION).build()
+                return ResponseBuilder(request_id, ResponseStatus.ERROR_INVALID_OPERATION).build(), []
 
         except Exception as e:
             # 处理错误
@@ -67,10 +67,10 @@ class ServiceHandler:
             # 尝试提取request_id
             try:
                 request_id, _ = Marshaller.unpack_int(request_data, 0)
-                return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+                return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
             except:
                 # 如果无法提取request_id，返回错误响应
-                return ResponseBuilder(0, ResponseStatus.ERROR_UNKNOWN).build()
+                return ResponseBuilder(0, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_open_account(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理开户请求"""
@@ -100,13 +100,13 @@ class ServiceHandler:
 
             print(f"[DEBUG] Response built: request_id={request_id}, status=SUCCESS, account_number={account_number}")
 
-            return response
+            return response, [account_number]
 
         except Exception as e:
             print(f"Error in open_account: {e}")
             import traceback
             traceback.print_exc()
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_close_account(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理销户请求"""
@@ -117,10 +117,10 @@ class ServiceHandler:
             password, offset = Marshaller.unpack_string(request_data, offset, fixed_length=16)
 
             # 执行销户
-            self.account_manager.close_account(account_number, name, password)
+            closed_account = self.account_manager.close_account(account_number, name, password)
 
             # 构建响应
-            return ResponseBuilder(request_id, ResponseStatus.SUCCESS).build()
+            return ResponseBuilder(request_id, ResponseStatus.SUCCESS).build(), [account_number]
 
         except ValueError as e:
             error_msg = str(e)
@@ -132,10 +132,10 @@ class ServiceHandler:
                 status = ResponseStatus.ERROR_INVALID_PASSWORD
             else:
                 status = ResponseStatus.ERROR_UNKNOWN
-            return ResponseBuilder(request_id, status).build()
+            return ResponseBuilder(request_id, status).build(), []
         except Exception as e:
             print(f"Error in close_account: {e}")
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_deposit(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理存款请求"""
@@ -149,12 +149,12 @@ class ServiceHandler:
             amount, offset = Marshaller.unpack_float(request_data, offset)
 
             # 执行存款
-            new_balance = self.account_manager.deposit(account_number, password, amount)
+            new_balance = self.account_manager.deposit(account_number, name, password, currency, amount)
 
             # 构建响应
             return (ResponseBuilder(request_id, ResponseStatus.SUCCESS)
                     .add_float(new_balance)
-                    .build())
+                    .build()), [account_number]
 
         except ValueError as e:
             error_msg = str(e)
@@ -162,12 +162,14 @@ class ServiceHandler:
                 status = ResponseStatus.ERROR_ACCOUNT_NOT_FOUND
             elif "password" in error_msg:
                 status = ResponseStatus.ERROR_INVALID_PASSWORD
+            elif "owned" in error_msg or "currency" in error_msg:
+                status = ResponseStatus.ERROR_INVALID_OPERATION
             else:
                 status = ResponseStatus.ERROR_UNKNOWN
-            return ResponseBuilder(request_id, status).build()
+            return ResponseBuilder(request_id, status).build(), []
         except Exception as e:
             print(f"Error in deposit: {e}")
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_withdraw(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理取款请求"""
@@ -181,12 +183,12 @@ class ServiceHandler:
             amount, offset = Marshaller.unpack_float(request_data, offset)
 
             # 执行取款
-            new_balance = self.account_manager.withdraw(account_number, password, amount)
+            new_balance = self.account_manager.withdraw(account_number, name, password, currency, amount)
 
             # 构建响应
             return (ResponseBuilder(request_id, ResponseStatus.SUCCESS)
                     .add_float(new_balance)
-                    .build())
+                    .build()), [account_number]
 
         except ValueError as e:
             error_msg = str(e)
@@ -196,12 +198,14 @@ class ServiceHandler:
                 status = ResponseStatus.ERROR_INVALID_PASSWORD
             elif "Insufficient" in error_msg:
                 status = ResponseStatus.ERROR_INSUFFICIENT_BALANCE
+            elif "owned" in error_msg or "currency" in error_msg:
+                status = ResponseStatus.ERROR_INVALID_OPERATION
             else:
                 status = ResponseStatus.ERROR_UNKNOWN
-            return ResponseBuilder(request_id, status).build()
+            return ResponseBuilder(request_id, status).build(), []
         except Exception as e:
             print(f"Error in withdraw: {e}")
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_monitor_register(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理监控注册请求"""
@@ -214,11 +218,11 @@ class ServiceHandler:
             # MonitorManager会在服务器主循环中被调用
 
             # 构建响应
-            return ResponseBuilder(request_id, ResponseStatus.SUCCESS).build()
+            return ResponseBuilder(request_id, ResponseStatus.SUCCESS).build(), []
 
         except Exception as e:
             print(f"Error in monitor_register: {e}")
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_query_account(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理查询账户请求（幂等操作）"""
@@ -227,28 +231,28 @@ class ServiceHandler:
             account_number, offset = Marshaller.unpack_int(request_data, offset)
             password, offset = Marshaller.unpack_string(request_data, offset, fixed_length=16)
 
-            # 验证密码
-            if not self.account_manager.verify_password(account_number, password):
-                return ResponseBuilder(request_id, ResponseStatus.ERROR_INVALID_PASSWORD).build()
-
             # 获取账户信息
             account = self.account_manager.get_account(account_number)
             if not account:
-                return ResponseBuilder(request_id, ResponseStatus.ERROR_ACCOUNT_NOT_FOUND).build()
+                return ResponseBuilder(request_id, ResponseStatus.ERROR_ACCOUNT_NOT_FOUND).build(), []
+
+            # 验证密码
+            if account.password != password:
+                return ResponseBuilder(request_id, ResponseStatus.ERROR_INVALID_PASSWORD).build(), []
 
             # 构建响应：account_number, name, currency, balance
             return (ResponseBuilder(request_id, ResponseStatus.SUCCESS)
                     .add_int(account.account_number)
                     .add_string(account.name)
-                    .add_int(account.currency)  # 直接使用currency的int值
+                    .add_int(account.currency.value if hasattr(account.currency, "value") else int(account.currency))
                     .add_float(account.balance)
-                    .build())
+                    .build()), []
 
         except Exception as e:
             print(f"Error in query_account: {e}")
             import traceback
             traceback.print_exc()
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []
 
     def _handle_transfer(self, request_data: bytes, offset: int, request_id: int) -> bytes:
         """处理转账请求（非幂等操作）"""
@@ -268,7 +272,7 @@ class ServiceHandler:
             # 构建响应
             return (ResponseBuilder(request_id, ResponseStatus.SUCCESS)
                     .add_float(new_balance)
-                    .build())
+                    .build()), [from_account, to_account]
 
         except ValueError as e:
             error_msg = str(e)
@@ -280,7 +284,7 @@ class ServiceHandler:
                 status = ResponseStatus.ERROR_INSUFFICIENT_BALANCE
             else:
                 status = ResponseStatus.ERROR_UNKNOWN
-            return ResponseBuilder(request_id, status).build()
+            return ResponseBuilder(request_id, status).build(), []
         except Exception as e:
             print(f"Error in transfer: {e}")
-            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
+            return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build(), []

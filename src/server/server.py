@@ -7,6 +7,7 @@ import argparse
 import sys
 import time
 import os
+from pathlib import Path
 
 # 添加src目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -123,6 +124,10 @@ class BankingServer:
             self.sock.close()
         print("Server stopped.")
 
+    def _make_request_key(self, client_addr: tuple, request_id: int) -> str:
+        """组合客户端地址和请求ID生成唯一键"""
+        return f"{client_addr[0]}:{client_addr[1]}#{request_id}"
+
     def _process_request(self, request_data: bytes, client_addr: tuple) -> bytes:
         """
         处理客户端请求
@@ -140,11 +145,12 @@ class BankingServer:
 
             # 至多一次语义：检查重复请求
             if self.semantics == SEMANTICS_AT_MOST_ONCE and self.request_history:
-                if self.request_history.is_duplicate(request_id):
+                request_key = self._make_request_key(client_addr, request_id)
+                if self.request_history.is_duplicate(request_key):
                     # 重复请求，返回缓存的响应
                     if self.verbose:
                         print(f"[DEBUG] Duplicate request {request_id}, returning cached response")
-                    cached_response = self.request_history.get_cached_response(request_id)
+                    cached_response = self.request_history.get_cached_response(request_key)
                     if cached_response:
                         return cached_response
 
@@ -158,19 +164,29 @@ class BankingServer:
             # 处理监控注册
             if operation_type == OperationType.MONITOR_REGISTER:
                 response_data = self._handle_monitor_register(request_data, client_addr, request_id)
+                updated_accounts = []
             else:
                 # 其他操作由ServiceHandler处理
-                response_data = self.service_handler.handle_request(request_data)
+                response_data, updated_accounts = self.service_handler.handle_request(request_data)
 
                 # 检查是否是修改账户的操作（需要发送监控通知）
                 if operation_type in [OperationType.OPEN_ACCOUNT, OperationType.CLOSE_ACCOUNT,
                                      OperationType.DEPOSIT, OperationType.WITHDRAW,
                                      OperationType.TRANSFER]:
-                    self._send_monitor_notifications()
+                    self._send_monitor_notifications(updated_accounts)
 
             # 至多一次语义：记录请求历史
             if self.semantics == SEMANTICS_AT_MOST_ONCE and self.request_history:
-                self.request_history.record_request(request_id, response_data)
+                self.request_history.record_request(self._make_request_key(client_addr, request_id), response_data)
+
+            # 打印请求/响应概要
+            try:
+                status_code, _ = Marshaller.unpack_int(response_data, 4)
+                print(f"[REQ] {client_addr} id={request_id} op={operation_type.name}")
+                print(f"[RESP] id={request_id} status={ResponseStatus(status_code).name}")
+            except Exception:
+                print(f"[REQ] {client_addr} id={request_id} op={operation_type}")
+                print("[RESP] <failed to parse>")
 
             return response_data
 
@@ -209,27 +225,37 @@ class BankingServer:
             print(f"Error in _handle_monitor_register: {e}")
             return ResponseBuilder(request_id, ResponseStatus.ERROR_UNKNOWN).build()
 
-    def _send_monitor_notifications(self):
+    def _send_monitor_notifications(self, account_numbers):
         """向所有监控客户端发送账户更新通知"""
         active_monitors = self.monitor_manager.get_active_monitors()
 
-        if not active_monitors:
+        if not active_monitors or not account_numbers:
             return
 
-        # 获取所有账户信息（简化版：发送所有账户的更新）
-        # 实际应用中应该只发送被更新的账户
-        accounts = self.account_manager.get_all_accounts()
+        for acc_no in set(account_numbers):
+            account = self.account_manager.get_account(acc_no)
+            if account:
+                payload = (
+                    Marshaller.pack_int(account.account_number) +
+                    Marshaller.pack_string(account.name) +
+                    Marshaller.pack_int(account.currency.value if hasattr(account.currency, "value") else int(account.currency)) +
+                    Marshaller.pack_float(account.balance)
+                )
+            else:
+                # 账户已关闭，仍发送通知以告知关闭
+                payload = (
+                    Marshaller.pack_int(acc_no) +
+                    Marshaller.pack_string("ACCOUNT_CLOSED") +
+                    Marshaller.pack_int(0) +
+                    Marshaller.pack_float(0.0)
+                )
 
-        for account in accounts.values():
             # 构建回调通知
             callback_data = (
                 Marshaller.pack_int(0) +  # request_id (回调消息没有对应请求)
                 Marshaller.pack_int(OperationType.MONITOR_CALLBACK) +
-                Marshaller.pack_int(0) +  # payload length占位
-                Marshaller.pack_int(account.account_number) +
-                Marshaller.pack_string(account.name) +
-                Marshaller.pack_int(account.currency.value) +
-                Marshaller.pack_float(account.balance)
+                Marshaller.pack_int(len(payload)) +
+                payload
             )
 
             # 发送给所有监控客户端
@@ -246,6 +272,26 @@ class BankingServer:
 
 def main():
     """主函数"""
+    # 设置日志 Tee 到文件和控制台
+    class Tee:
+        def __init__(self, stream, file_path):
+            self.stream = stream
+            self.file = open(file_path, "a", buffering=1)
+
+        def write(self, data):
+            self.stream.write(data)
+            self.file.write(data)
+
+        def flush(self):
+            self.stream.flush()
+            self.file.flush()
+
+    project_root = Path(__file__).resolve().parents[2]
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    sys.stdout = Tee(sys.stdout, logs_dir / "server.log")
+    sys.stderr = Tee(sys.stderr, logs_dir / "server.log")
+
     parser = argparse.ArgumentParser(description='Distributed Banking System - Server')
     parser.add_argument('--host', type=str, default=DEFAULT_SERVER_HOST,
                         help=f'Server host (default: {DEFAULT_SERVER_HOST})')

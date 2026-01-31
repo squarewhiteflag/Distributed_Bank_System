@@ -63,7 +63,7 @@ class TestAccountManager(unittest.TestCase):
         )
 
         # 存款
-        new_balance = self.manager.deposit(account_number, "pass123", 500.0)
+        new_balance = self.manager.deposit(account_number, "Alice", "pass123", CurrencyType.USD, 500.0)
 
         # 验证余额
         self.assertAlmostEqual(new_balance, 1500.0, places=4)
@@ -78,13 +78,13 @@ class TestAccountManager(unittest.TestCase):
 
         # 密码错误应该抛出异常
         with self.assertRaises(ValueError) as context:
-            self.manager.deposit(account_number, "wrongpass", 500.0)
+            self.manager.deposit(account_number, "Alice", "wrongpass", CurrencyType.USD, 500.0)
         self.assertIn("password", str(context.exception).lower())
 
     def test_deposit_nonexistent_account(self):
         """测试向不存在的账户存款"""
         with self.assertRaises(ValueError) as context:
-            self.manager.deposit(99999, "pass123", 500.0)
+            self.manager.deposit(99999, "Alice", "pass123", CurrencyType.USD, 500.0)
         self.assertIn("not found", str(context.exception).lower())
 
     def test_withdraw(self):
@@ -94,7 +94,7 @@ class TestAccountManager(unittest.TestCase):
         )
 
         # 取款
-        new_balance = self.manager.withdraw(account_number, "pass123", 300.0)
+        new_balance = self.manager.withdraw(account_number, "Alice", "pass123", CurrencyType.USD, 300.0)
 
         # 验证余额
         self.assertAlmostEqual(new_balance, 700.0, places=4)
@@ -109,7 +109,7 @@ class TestAccountManager(unittest.TestCase):
 
         # 余额不足应该抛出异常
         with self.assertRaises(ValueError) as context:
-            self.manager.withdraw(account_number, "pass123", 1500.0)
+            self.manager.withdraw(account_number, "Alice", "pass123", CurrencyType.USD, 1500.0)
         self.assertIn("insufficient", str(context.exception).lower())
 
     def test_withdraw_wrong_password(self):
@@ -119,7 +119,7 @@ class TestAccountManager(unittest.TestCase):
         )
 
         with self.assertRaises(ValueError) as context:
-            self.manager.withdraw(account_number, "wrongpass", 300.0)
+            self.manager.withdraw(account_number, "Alice", "wrongpass", CurrencyType.USD, 300.0)
         self.assertIn("password", str(context.exception).lower())
 
     def test_close_account(self):
@@ -129,8 +129,8 @@ class TestAccountManager(unittest.TestCase):
         )
 
         # 销户
-        result = self.manager.close_account(account_number, "Alice", "pass123")
-        self.assertTrue(result)
+        closed = self.manager.close_account(account_number, "Alice", "pass123")
+        self.assertIsInstance(closed, Account)
 
         # 验证账户已删除
         account = self.manager.get_account(account_number)

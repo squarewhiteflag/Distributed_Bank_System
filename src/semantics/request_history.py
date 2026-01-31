@@ -8,7 +8,7 @@ from typing import Optional, Dict, Tuple
 
 
 class RequestHistory:
-    """请求历史记录管理器"""
+    """请求历史记录管理器（支持按客户端+请求ID区分）"""
 
     def __init__(self, max_age_seconds: int = 300):
         """
@@ -17,62 +17,62 @@ class RequestHistory:
         Args:
             max_age_seconds: 历史记录最大保留时间（秒），默认5分钟
         """
-        # 格式: {request_id: (response_data, timestamp)}
-        self.history: Dict[int, Tuple[bytes, float]] = {}
+        # 格式: {request_key: (response_data, timestamp)}
+        self.history: Dict[str, Tuple[bytes, float]] = {}
         self.max_age = max_age_seconds
 
-    def is_duplicate(self, request_id: int) -> bool:
+    def is_duplicate(self, request_key: str) -> bool:
         """
         检查是否为重复请求
 
         Args:
-            request_id: 请求ID
+            request_key: 客户端唯一请求键 (client_ip:port#request_id)
 
         Returns:
             True如果是重复请求且记录未过期
         """
-        if request_id not in self.history:
+        if request_key not in self.history:
             return False
 
         # 检查是否过期
-        _, timestamp = self.history[request_id]
+        _, timestamp = self.history[request_key]
         if time.time() - timestamp > self.max_age:
             # 过期，删除记录
-            del self.history[request_id]
+            del self.history[request_key]
             return False
 
         return True
 
-    def get_cached_response(self, request_id: int) -> Optional[bytes]:
+    def get_cached_response(self, request_key: str) -> Optional[bytes]:
         """
         获取缓存的响应
 
         Args:
-            request_id: 请求ID
+            request_key: 唯一请求键
 
         Returns:
             缓存的响应数据，如果不存在则返回None
         """
-        if request_id in self.history:
-            response, _ = self.history[request_id]
+        if request_key in self.history:
+            response, _ = self.history[request_key]
             return response
         return None
 
-    def record_request(self, request_id: int, response: bytes):
+    def record_request(self, request_key: str, response: bytes):
         """
         记录请求和响应
 
         Args:
-            request_id: 请求ID
+            request_key: 唯一请求键
             response: 响应数据
         """
-        self.history[request_id] = (response, time.time())
+        self.history[request_key] = (response, time.time())
 
     def cleanup_old_records(self):
         """清理所有过期的记录"""
         current_time = time.time()
         expired_keys = [
-            req_id for req_id, (_, timestamp) in self.history.items()
+            key for key, (_, timestamp) in self.history.items()
             if current_time - timestamp > self.max_age
         ]
         for key in expired_keys:

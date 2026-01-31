@@ -1,0 +1,11 @@
+# Current Defects (as identified; now addressed in code)
+
+- Monitor callback unusable: server registered request socket port, client listened on another. (fixed)
+- Monitor callback parsing misaligned: payload length ignored by client. (fixed)
+- Transfer response parsing bug: payload length misread as balance. (fixed)
+- At-most-once duplicate detection keyed only by request_id (cross-client collision). (fixed)
+- Query account error ordering: password checked before existence. (fixed)
+- Deposit/withdraw missing owner & currency validation. (fixed)
+- Monitor callback broadcasted all accounts instead of just updated ones. (fixed)
+- Client semantics flag unused for retries (at-most-once should avoid duplicates). (fixed)
+- Server lacked mandatory request/response logging output. (fixed)

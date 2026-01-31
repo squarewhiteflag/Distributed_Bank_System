@@ -7,6 +7,7 @@ import argparse
 import sys
 import time
 import os
+from pathlib import Path
 
 # 添加src目录到路径
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
@@ -43,7 +44,7 @@ class BankingClient:
         self.request_counter += 1
         return self.request_counter
 
-    def _send_request(self, request_data: bytes, max_retries: int = MAX_RETRIES) -> bytes:
+    def _send_request(self, request_data: bytes, max_retries: int = None) -> bytes:
         """
         发送请求到服务器（带超时重传）
 
@@ -57,7 +58,9 @@ class BankingClient:
         Raises:
             Exception: 如果所有重试都失败
         """
-        for attempt in range(max_retries):
+        retries = max_retries if max_retries is not None else (MAX_RETRIES if self.semantics == SEMANTICS_AT_LEAST_ONCE else 1)
+
+        for attempt in range(retries):
             try:
                 # 创建socket
                 self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -86,6 +89,33 @@ class BankingClient:
                 if self.sock:
                     self.sock.close()
 
+        raise Exception("Failed to receive response")
+
+    def _send_request_with_socket(self, sock: socket.socket, request_data: bytes,
+                                  max_retries: int = None) -> bytes:
+        """
+        使用已有socket发送请求（用于监控场景，保持端口一致）
+        """
+        retries = max_retries if max_retries is not None else (MAX_RETRIES if self.semantics == SEMANTICS_AT_LEAST_ONCE else 1)
+
+        for attempt in range(retries):
+            try:
+                sock.settimeout(DEFAULT_CLIENT_TIMEOUT)
+
+                if not self.loss_simulator.should_send():
+                    if attempt == max_retries - 1:
+                        raise Exception("Request lost (simulated) and max retries reached")
+                    ClientUI.display_info(f"Request lost (simulated), retrying... ({attempt + 1}/{max_retries})")
+                    time.sleep(0.5)
+                    continue
+
+                sock.sendto(request_data, self.server_address)
+                response_data, _ = sock.recvfrom(MAX_MESSAGE_SIZE)
+                return response_data
+            except socket.timeout:
+                if attempt == max_retries - 1:
+                    raise Exception("Request timeout and max retries reached")
+                ClientUI.display_info(f"Request timeout, retrying... ({attempt + 1}/{max_retries})")
         raise Exception("Failed to receive response")
 
     def open_account(self):
@@ -294,6 +324,7 @@ class BankingClient:
             # 解析响应
             resp_request_id, offset = Marshaller.unpack_int(response_data, 0)
             status, offset = Marshaller.unpack_int(response_data, offset)
+            payload_length, offset = Marshaller.unpack_int(response_data, offset)
 
             if status == ResponseStatus.SUCCESS:
                 new_balance, _ = Marshaller.unpack_float(response_data, offset)
@@ -314,29 +345,15 @@ class BankingClient:
         """监控账户更新"""
         duration = ClientUI.get_monitor_info()
 
-        # 首先向服务器注册监控
         request_id = self._get_next_request_id()
         request = (RequestBuilder(request_id, OperationType.MONITOR_REGISTER)
                    .add_int(duration)
                    .build())
 
         try:
-            # 发送注册请求
-            response_data = self._send_request(request)
-
-            # 解析响应
-            resp_request_id, offset = Marshaller.unpack_int(response_data, 0)
-            status, offset = Marshaller.unpack_int(response_data, offset)
-            payload_length, offset = Marshaller.unpack_int(response_data, offset)
-
-            if status == ResponseStatus.SUCCESS:
-                ClientUI.display_success("Monitor registration successful!")
-                # 开始监控（阻塞等待回调）
-                monitor = MonitorClient(self.server_address)
-                monitor.start_monitoring(duration)
-            else:
-                ClientUI.display_error(f"Failed to register monitor. Status: {status}")
-
+            monitor = MonitorClient(self.server_address, loss_simulator=self.loss_simulator,
+                                    semantics=self.semantics)
+            monitor.start_monitoring(duration, request, request_id)
         except Exception as e:
             ClientUI.display_error(str(e))
 
@@ -375,6 +392,26 @@ class BankingClient:
 
 def main():
     """主函数"""
+    # Tee 日志到文件
+    class Tee:
+        def __init__(self, stream, file_path):
+            self.stream = stream
+            self.file = open(file_path, "a", buffering=1)
+
+        def write(self, data):
+            self.stream.write(data)
+            self.file.write(data)
+
+        def flush(self):
+            self.stream.flush()
+            self.file.flush()
+
+    project_root = Path(__file__).resolve().parents[2]
+    logs_dir = project_root / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    sys.stdout = Tee(sys.stdout, logs_dir / "client.log")
+    sys.stderr = Tee(sys.stderr, logs_dir / "client.log")
+
     parser = argparse.ArgumentParser(description='Distributed Banking System - Client')
     parser.add_argument('--server-host', type=str, required=True,
                         help='Server host address')

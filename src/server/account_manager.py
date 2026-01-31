@@ -48,6 +48,10 @@ class AccountManager:
         account_number = self.next_account_number
         self.next_account_number += 1
 
+        # 确保使用CurrencyType枚举
+        if not isinstance(currency, CurrencyType):
+            currency = CurrencyType(int(currency))
+
         account = Account(
             account_number=account_number,
             name=name,
@@ -59,7 +63,7 @@ class AccountManager:
         self.accounts[account_number] = account
         return account_number
 
-    def close_account(self, account_number: int, name: str, password: str) -> bool:
+    def close_account(self, account_number: int, name: str, password: str):
         """
         关闭账户
 
@@ -69,7 +73,7 @@ class AccountManager:
             password: 账户密码
 
         Returns:
-            True如果关闭成功
+            被关闭的账户对象（用于回调），关闭失败抛出异常
 
         Raises:
             ValueError: 如果账户不存在、密码错误或账户不属于该用户
@@ -82,10 +86,19 @@ class AccountManager:
         if account.password != password:
             raise ValueError("Invalid password")
 
+        # 保留快照用于回调
+        closed_account = Account(
+            account_number=account.account_number,
+            name=account.name,
+            password=account.password,
+            currency=account.currency,
+            balance=account.balance
+        )
         del self.accounts[account_number]
-        return True
+        return closed_account
 
-    def deposit(self, account_number: int, password: str, amount: float) -> float:
+    def deposit(self, account_number: int, name: str, password: str,
+                currency, amount: float) -> float:
         """
         存款
 
@@ -98,18 +111,25 @@ class AccountManager:
             存款后的新余额
 
         Raises:
-            ValueError: 如果账户不存在或密码错误
+            ValueError: 如果账户不存在、密码错误、账户不属于该用户或币种不匹配
         """
         account = self.accounts.get(account_number)
         if not account:
             raise ValueError("Account not found")
+        if account.name != name:
+            raise ValueError("Account not owned by this user")
         if account.password != password:
             raise ValueError("Invalid password")
+        if not isinstance(currency, CurrencyType):
+            currency = CurrencyType(int(currency))
+        if account.currency != currency:
+            raise ValueError("Currency mismatch")
 
         account.balance += amount
         return account.balance
 
-    def withdraw(self, account_number: int, password: str, amount: float) -> float:
+    def withdraw(self, account_number: int, name: str, password: str,
+                 currency, amount: float) -> float:
         """
         取款
 
@@ -122,13 +142,19 @@ class AccountManager:
             取款后的新余额
 
         Raises:
-            ValueError: 如果账户不存在、密码错误或余额不足
+            ValueError: 如果账户不存在、密码错误、账户不属于该用户、币种不匹配或余额不足
         """
         account = self.accounts.get(account_number)
         if not account:
             raise ValueError("Account not found")
+        if account.name != name:
+            raise ValueError("Account not owned by this user")
         if account.password != password:
             raise ValueError("Invalid password")
+        if not isinstance(currency, CurrencyType):
+            currency = CurrencyType(int(currency))
+        if account.currency != currency:
+            raise ValueError("Currency mismatch")
         if account.balance < amount:
             raise ValueError("Insufficient balance")
 
@@ -191,6 +217,10 @@ class AccountManager:
         to_acc = self.accounts.get(to_account)
         if not to_acc:
             raise ValueError("Destination account not found")
+
+        # 保证币种一致
+        if from_acc.currency != to_acc.currency:
+            raise ValueError("Currency mismatch between accounts")
 
         # 执行转账
         from_acc.balance -= amount
