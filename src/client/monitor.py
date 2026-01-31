@@ -10,24 +10,25 @@ import os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 from common.marshaller import Marshaller
 from common.protocol import OperationType
+from common.constants import MAX_RETRIES, DEFAULT_CLIENT_TIMEOUT
 from client.ui import ClientUI
 
 
 class MonitorClient:
     """监控客户端"""
 
-    def __init__(self, server_address: tuple, timeout: float = 5.0, loss_simulator=None, semantics="at-most-once"):
+    def __init__(self, server_address: tuple, timeout: float = None, loss_simulator=None, semantics="at-most-once"):
         """
         初始化监控客户端
 
         Args:
             server_address: 服务器地址 (host, port)
-            timeout: socket超时时间（秒）
+            timeout: socket超时时间（秒），默认使用 DEFAULT_CLIENT_TIMEOUT
             loss_simulator: 用于模拟消息丢失的实例
-            semantics: 调用语义，决定重试次数
+            semantics: 调用语义（用于日志显示）
         """
         self.server_address = server_address
-        self.timeout = timeout
+        self.timeout = timeout if timeout is not None else DEFAULT_CLIENT_TIMEOUT
         self.loss_simulator = loss_simulator
         self.semantics = semantics
         self.sock = None
@@ -46,15 +47,15 @@ class MonitorClient:
             self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self.sock.bind(('0.0.0.0', 0))
 
-            # 注册监控（使用同一socket）
-            max_retries = 3 if self.semantics == "at-least-once" else 1
-            for attempt in range(max_retries):
+            # 注册监控（使用同一socket），使用 MAX_RETRIES 次重试
+            for attempt in range(MAX_RETRIES):
                 try:
                     self.sock.settimeout(self.timeout)
                     if self.loss_simulator and not self.loss_simulator.should_send():
-                        if attempt == max_retries - 1:
-                            raise Exception("Monitor registration lost (simulated)")
-                        ClientUI.display_info(f"Monitor registration lost, retrying ({attempt+1}/{max_retries})")
+                        if attempt == MAX_RETRIES - 1:
+                            raise Exception("Monitor registration lost (simulated) and max retries reached")
+                        ClientUI.display_info(f"Monitor registration lost (simulated), retrying... ({attempt + 1}/{MAX_RETRIES})")
+                        time.sleep(0.5)  # 短暂等待后重试
                         continue
 
                     self.sock.sendto(registration_request, self.server_address)
@@ -69,9 +70,9 @@ class MonitorClient:
                     else:
                         raise Exception(f"Monitor registration failed with status {status}")
                 except socket.timeout:
-                    if attempt == max_retries - 1:
-                        raise Exception("Monitor registration timeout")
-                    ClientUI.display_info(f"Monitor registration timeout, retrying ({attempt+1}/{max_retries})")
+                    if attempt == MAX_RETRIES - 1:
+                        raise Exception("Monitor registration timeout and max retries reached")
+                    ClientUI.display_info(f"Monitor registration timeout, retrying... ({attempt + 1}/{MAX_RETRIES})")
 
             # 获取实际绑定的端口
             actual_port = self.sock.getsockname()[1]
